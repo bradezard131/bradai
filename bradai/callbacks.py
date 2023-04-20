@@ -11,10 +11,11 @@ from fastprogress.fastprogress import master_bar, progress_bar, MasterBar
 from torcheval.metrics import Metric, Mean
 from wandb.sdk.wandb_run import Run
 
+from .exceptions import CancelException
 from .utils import to_device
 
 if TYPE_CHECKING:
-    from .learner import Learner, CancelException
+    from .learner import Learner
 
 
 class Callback:
@@ -161,7 +162,7 @@ class TrainCallback(Callback):
         learner.batch_targets = learner.batch[self.num_inputs :]
         learner.loss = learner.criterion(
             learner.preds,
-            learner.batch_targets,
+            *learner.batch_targets
         )
 
     def backward(self, learner: Learner) -> None:

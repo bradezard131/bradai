@@ -9,6 +9,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from .callbacks import Callback, LRFinderCallback, MetricsCallback
+from .exceptions import CancelException
 
 
 @dataclass
@@ -16,12 +17,6 @@ class DataLoaders:
     train: DataLoader
     val: DataLoader | None = None
     test: DataLoader | None = None
-
-
-class CancelException(Exception):
-    def __init__(self, *args: Any, name: str, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.name = name
 
 
 class _CallbackWrapper:
@@ -34,7 +29,7 @@ class _CallbackWrapper:
         def _wrapper(owner: Learner, *args: Any, **kwargs: Any) -> Any:
             try:
                 owner.callback(f"before_{self.name}")
-                result = func(*args, **kwargs)
+                result = func(owner, *args, **kwargs)
                 owner.callback(f"after_{self.name}")
                 return result
             except CancelException as e:
