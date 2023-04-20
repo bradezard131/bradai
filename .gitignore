@@ -4,3 +4,7 @@
 
 # Package Artifacts
 *.egg-info
+
+# PyCache
+__pycache__
+**/__pycache__

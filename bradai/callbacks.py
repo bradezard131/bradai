@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 import accelerate
 import matplotlib.pyplot as plt
 import torch
 import wandb
-from fastprogress import master_bar, progress_bar
+from fastprogress.fastprogress import master_bar, progress_bar, MasterBar
 from torcheval.metrics import Metric, Mean
 from wandb.sdk.wandb_run import Run
 
-from .learner import Learner, CancelException
 from .utils import to_device
+
+if TYPE_CHECKING:
+    from .learner import Learner, CancelException
 
 
 class Callback:
@@ -234,6 +236,7 @@ class ProgressBarCallback(Callback):
         super().__init__()
         self.plot = plot
         self.first_epoch: bool = True
+        self.mbar: MasterBar
 
     def _update_graph(self, learner: Learner) -> None:
         self.mbar.update_graph(
@@ -251,9 +254,9 @@ class ProgressBarCallback(Callback):
         self, learner: Learner, log: dict[str, float], wrapped: Callable | None = None
     ) -> None:
         if self.first_epoch:
-            self.mbar.write(list(log), table=True)
+            self.mbar.write(list(log), table=True)  # type: ignore
             self.first_epoch = False
-        self.mbar.write(list(log.values()), table=True)
+        self.mbar.write(list(log.values()), table=True)  # type: ignore
         if wrapped is not None:
             wrapped(log)
 
