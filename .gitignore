@@ -1,2 +1,6 @@
+# MyPy
 **/.mypy_cache
 .mypy_cache
+
+# Package Artifacts
+*.egg-info
