@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from functools import partial
 from typing import Any, Callable
 
@@ -21,10 +22,18 @@ class Callback:
 class AccelerateCallback(Callback):
     def __init__(
         self,
-        *args,
-        **kwargs,
+        *args: Any,
+        accelerator: accelerate.Accelerator | None = None,
+        **kwargs: Any,
     ) -> None:
-        self.accelerator = accelerate.Accelerator(*args, **kwargs)
+        if accelerator is None:
+            self.accelerator = accelerate.Accelerator(*args, **kwargs)
+        else:
+            if len(args) > 0 or len(kwargs) > 0:
+                raise ValueError(
+                    "Cannot specify accelerator and accelerator args/kwargs"
+                )
+            self.accelerator = accelerator
 
     def before_fit(self, learner: Learner) -> None:
         (
@@ -143,12 +152,12 @@ class TrainCallback(Callback):
         self.num_inputs = num_inputs
 
     def predict(self, learner: Learner) -> None:
-        learner.batch_inputs = learner.batch[: self.num_inputs]  # type: ignore
-        learner.preds = learner.model(*learner.batch_inputs)  # type: ignore
+        learner.batch_inputs = learner.batch[: self.num_inputs]
+        learner.preds = learner.model(*learner.batch_inputs)
 
     def get_loss(self, learner: Learner) -> None:
-        learner.batch_targets = learner.batch[self.num_inputs :]  # type: ignore
-        learner.loss = learner.criterion(  # type: ignore
+        learner.batch_targets = learner.batch[self.num_inputs :]
+        learner.loss = learner.criterion(
             learner.preds,
             learner.batch_targets,
         )
@@ -196,7 +205,7 @@ class MetricsCallback(Callback):
         self.loss = Mean()
 
     def before_fit(self, learner: Learner) -> None:
-        learner.metrics = self  # type: ignore
+        learner.metrics = self
 
     def before_epoch(self, learner: Learner) -> None:
         for metric in self.metrics.values():
@@ -215,7 +224,7 @@ class MetricsCallback(Callback):
         targets = to_device(learner.batch_targets, "cpu")
         for metric in self.metrics.values():
             metric.update(to_device(learner.preds, "cpu"), targets)
-        self.loss.update(to_device(learner.loss, "cpu"), weight=len(learner.batch_inputs[0]))  # type: ignore
+        self.loss.update(to_device(learner.loss, "cpu"), weight=len(learner.batch_inputs[0]))
 
 
 class ProgressBarCallback(Callback):
@@ -224,6 +233,7 @@ class ProgressBarCallback(Callback):
     def __init__(self, plot: bool = False) -> None:
         super().__init__()
         self.plot = plot
+        self.first_epoch: bool = True
 
     def _update_graph(self, learner: Learner) -> None:
         self.mbar.update_graph(
@@ -240,7 +250,7 @@ class ProgressBarCallback(Callback):
     def _log(
         self, learner: Learner, log: dict[str, float], wrapped: Callable | None = None
     ) -> None:
-        if self.first_epoch:  # type: ignore
+        if self.first_epoch:
             self.mbar.write(list(log), table=True)
             self.first_epoch = False
         self.mbar.write(list(log.values()), table=True)
@@ -248,11 +258,11 @@ class ProgressBarCallback(Callback):
             wrapped(log)
 
     def before_fit(self, learner: Learner) -> None:
-        learner.epochs = self.mbar = master_bar(learner.total_epochs)  # type: ignore
+        learner.epochs = self.mbar = master_bar(learner.total_epochs)
         self.first_epoch = True
         if hasattr(learner, "metrics"):
             log_fn = partial(self._log, wrapped=getattr(learner, "log", None))
-            learner.log = log_fn  # type: ignore
+            learner.log = log_fn
         self.losses: list[float] = []
         self.val_losses: list[float] = []
 
@@ -271,7 +281,7 @@ class ProgressBarCallback(Callback):
     def after_epoch(self, learner: Learner) -> None:
         if not learner.training:
             if self.plot and hasattr(learner, "metrics"):
-                self.val_losses.append(learner.metrics.loss.compute())
+                self.val_losses.append(learner.metrics.loss.compute().item())
                 self._update_graph(learner)
 
 

@@ -1,14 +1,14 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from functools import partial
+from functools import partial, wraps
 from operator import attrgetter
-from typing import Callable
+from typing import Any, Callable, Iterable, Sequence
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from .callbacks import Callback, LRFinderCallback
+from .callbacks import Callback, LRFinderCallback, MetricsCallback
 
 
 @dataclass
@@ -19,7 +19,7 @@ class DataLoaders:
 
 
 class CancelException(Exception):
-    def __init__(self, *args, name: str, **kwargs) -> None:
+    def __init__(self, *args: Any, name: str, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.name = name
 
@@ -30,7 +30,8 @@ class _CallbackWrapper:
         self.name = name
 
     def __call__(self, func: Callable) -> Callable:
-        def _wrapper(owner, *args, **kwargs):
+        @wraps(func)
+        def _wrapper(owner, *args: Any, **kwargs: Any) -> Any:
             try:
                 owner.callback(f"before_{self.name}")
                 result = func(*args, **kwargs)
@@ -63,6 +64,16 @@ class Learner:
         self.opt_fn = opt_fn
         self.callbacks = callbacks
 
+        # type definitions for stuff that is dynamically added
+        self.batch: Sequence
+        self.batch_inputs: Sequence
+        self.batch_targets: Sequence
+        self.epochs: Iterable
+        self.log: Callable
+        self.loss: torch.Tensor
+        self.metrics: MetricsCallback
+        self.preds: Any
+
     @property
     def training(self) -> bool:
         return self.model.training
@@ -92,7 +103,7 @@ class Learner:
 
     @_CallbackWrapper("fit")
     def _fit(self, val_freq: int = 1) -> None:
-        for self.epoch in range(self.total_epochs):
+        for self.epoch in self.epochs:
             self.one_epoch(True)
             self.callback("after_train")
             if self.epoch % val_freq == 0:
@@ -112,6 +123,7 @@ class Learner:
             self.total_epochs = epochs
             learning_rate = learning_rate or self.default_learning_rate
             self.opt = self.opt_fn(self.model.parameters(), lr=learning_rate)
+            self.epochs = range(self.total_epochs)
             self._fit(val_freq)
         finally:
             self.callbacks = self.callbacks[: -len(callbacks)]  # remove temp callbacks
