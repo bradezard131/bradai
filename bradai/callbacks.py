@@ -241,7 +241,7 @@ class ProgressBarCallback(Callback):
                 [range(len(self.losses)), self.losses],
                 [
                     torch.arange(1, learner.total_epochs + 1)
-                    * len(learner.dataloaders.train),
+                    * len(learner.dataloaders.train),  # type: ignore
                     self.val_losses,
                 ],
             ]
@@ -272,7 +272,7 @@ class ProgressBarCallback(Callback):
         )
 
     def after_batch(self, learner: Learner) -> None:
-        learner.dataloader.comment = f"Loss: {learner.loss:10.04e}"
+        learner.dataloader.comment = f"Loss: {learner.loss:10.04e}"  # type: ignore
         if self.plot and hasattr(learner, "metrics") and learner.training:
             self.losses.append(learner.loss.item())
             if self.val_losses:

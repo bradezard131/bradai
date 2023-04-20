@@ -13,7 +13,7 @@ from .callbacks import Callback, LRFinderCallback, MetricsCallback
 
 @dataclass
 class DataLoaders:
-    train: DataLoader | None = None
+    train: DataLoader
     val: DataLoader | None = None
     test: DataLoader | None = None
 
@@ -31,7 +31,7 @@ class _CallbackWrapper:
 
     def __call__(self, func: Callable) -> Callable:
         @wraps(func)
-        def _wrapper(owner, *args: Any, **kwargs: Any) -> Any:
+        def _wrapper(owner: Learner, *args: Any, **kwargs: Any) -> Any:
             try:
                 owner.callback(f"before_{self.name}")
                 result = func(*args, **kwargs)
@@ -50,7 +50,7 @@ class Learner:
     def __init__(
         self,
         model: nn.Module,
-        dataloaders,
+        dataloaders: DataLoaders,
         criterion: Callable,
         default_learning_rate: float,
         opt_fn: Callable,
@@ -68,10 +68,12 @@ class Learner:
         self.batch: Sequence
         self.batch_inputs: Sequence
         self.batch_targets: Sequence
+        self.dataloader: DataLoader | Iterable
         self.epochs: Iterable
         self.log: Callable
         self.loss: torch.Tensor
         self.metrics: MetricsCallback
+        self.opt: torch.optim.Optimizer
         self.preds: Any
 
     @property
@@ -98,7 +100,7 @@ class Learner:
 
     def one_epoch(self, train: bool) -> None:
         self.model.train(train)
-        self.dataloader = self.dataloaders.train if train else self.dataloaders.val
+        self.dataloader = self.dataloaders.train if train else (self.dataloaders.val or self.dataloaders.train)
         self._one_epoch()
 
     @_CallbackWrapper("fit")
