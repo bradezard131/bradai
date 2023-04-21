@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 from functools import partial, wraps
 from operator import attrgetter
@@ -95,7 +96,11 @@ class Learner:
 
     def one_epoch(self, train: bool) -> None:
         self.model.train(train)
-        self.dataloader = self.dataloaders.train if train else (self.dataloaders.val or self.dataloaders.train)
+        self.dataloader = (
+            self.dataloaders.train
+            if train
+            else (self.dataloaders.val or self.dataloaders.train)
+        )
         self._one_epoch()
 
     @_CallbackWrapper("fit")

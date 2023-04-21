@@ -1,2 +1,24 @@
+[build-system]
+requires = ["setuptools"]
+
+[project]
+name = "bradai"
+authors = [
+    {name = "Bradley Ezard", email = "bradley.ezard@postgrad.curtin.edu.au"},
+]
+description = "A package for deep learning training"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "accelerate>=0.18.0",
+    "fastprogress>=1.0.3",
+    "matplotlib>=3.7.1",
+    "torcheval>=0.0.6",
+    "wandb>=0.15.0",
+]
+
 [tool.black]
 target-version = ['py310', 'py311']
