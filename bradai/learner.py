@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from functools import partial, wraps
 from operator import attrgetter
 from typing import Any, Callable, Iterable, Sequence
@@ -11,13 +10,7 @@ from torch.utils.data import DataLoader
 
 from .callbacks import Callback, LRFinderCallback, MetricsCallback
 from .exceptions import CancelException
-
-
-@dataclass
-class DataLoaders:
-    train: DataLoader
-    val: DataLoader | None = None
-    test: DataLoader | None = None
+from .utils import DataLoaders
 
 
 class _CallbackWrapper:
