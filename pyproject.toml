@@ -3,6 +3,7 @@ requires = ["setuptools"]
 
 [project]
 name = "bradai"
+version = "0.0.0"
 authors = [
     {name = "Bradley Ezard", email = "bradley.ezard@postgrad.curtin.edu.au"},
 ]
