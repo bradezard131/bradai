@@ -126,7 +126,10 @@ class LRFinderCallback(Callback):
     def cleanup_fit(self, learner: Learner) -> None:
         fig, ax = plt.subplots()
         ax.plot(self.lrs, self.losses)
+        ax.set_title("Learning Rate Finder")
+        ax.set_ylabel("Loss")
         ax.set_xscale("log")
+        ax.set_xlabel("Learning Rate")
         fig.show()
 
 
