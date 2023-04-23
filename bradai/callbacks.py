@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from functools import partial
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -20,47 +21,6 @@ if TYPE_CHECKING:
 
 class Callback:
     order: int = 0
-
-
-class AccelerateCallback(Callback):
-    def __init__(
-        self,
-        *args: Any,
-        accelerator: accelerate.Accelerator | None = None,
-        **kwargs: Any,
-    ) -> None:
-        if accelerator is None:
-            self.accelerator = accelerate.Accelerator(*args, **kwargs)
-        else:
-            if len(args) > 0 or len(kwargs) > 0:
-                raise ValueError(
-                    "Cannot specify accelerator and accelerator args/kwargs"
-                )
-            self.accelerator = accelerator
-
-    def before_fit(self, learner: Learner) -> None:
-        (
-            learner.model,
-            learner.criterion,
-            learner.opt,
-            learner.dataloaders.train,
-            learner.dataloaders.val,
-            learner.dataloaders.test,
-        ) = self.accelerator.prepare(
-            learner.model,
-            learner.criterion,
-            learner.opt,
-            learner.dataloaders.train,
-            learner.dataloaders.val,
-            learner.dataloaders.test,
-        )
-
-    def before_batch(self, learner: Learner) -> None:
-        self.accumulator = self.accelerator.accumulate(learner.model)
-        self.accumulator.__enter__()
-
-    def after_batch(self, learner: Learner) -> None:
-        self.accumulator.__exit__(None, None, None)
 
 
 class CompletionCallback(Callback):
@@ -100,16 +60,19 @@ class LRFinderCallback(Callback):
         self,
         gamma: float = 1.3,
         hysteresis: float = 3.0,
+        max_lr: float = float("inf"),
     ) -> None:
         super().__init__()
         self.gamma = gamma
         self.hysteresis = hysteresis
+        self.max_lr = max_lr
 
     def before_fit(self, learner: Learner) -> None:
         self.lrs: list[float] = []
         self.losses: list[float] = []
         self.sched = torch.optim.lr_scheduler.ExponentialLR(learner.opt, self.gamma)
         self.best = float("inf")
+        self.initial_state = deepcopy(learner.model.state_dict())
 
     def after_batch(self, learner: Learner) -> None:
         if not learner.training:
@@ -119,7 +82,7 @@ class LRFinderCallback(Callback):
         loss = float(learner.loss.item())
         self.losses.append(loss)
         self.best = min(self.best, loss)
-        if loss > self.best * self.hysteresis:
+        if loss > self.best * self.hysteresis or self.lrs[-1] > self.max_lr:
             raise CancelException(name="fit")
         self.sched.step()
 
@@ -131,6 +94,8 @@ class LRFinderCallback(Callback):
         ax.set_xscale("log")
         ax.set_xlabel("Learning Rate")
         fig.show()
+        learner.model.load_state_dict(self.initial_state)
+        del self.initial_state
 
 
 class LRSchedulerCallback(Callback):
@@ -163,10 +128,7 @@ class TrainCallback(Callback):
 
     def get_loss(self, learner: Learner) -> None:
         learner.batch_targets = learner.batch[self.num_inputs :]
-        learner.loss = learner.criterion(
-            learner.preds,
-            *learner.batch_targets
-        )
+        learner.loss = learner.criterion(learner.preds, *learner.batch_targets)
 
     def backward(self, learner: Learner) -> None:
         learner.loss.backward()
@@ -176,6 +138,52 @@ class TrainCallback(Callback):
 
     def zero_grad(self, learner: Learner) -> None:
         learner.opt.zero_grad(True)
+
+
+class AccelerateCallback(TrainCallback):
+    def __init__(
+        self,
+        *args: Any,
+        num_inputs: int = 1,
+        accelerator: accelerate.Accelerator | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if accelerator is None:
+            self.accelerator = accelerate.Accelerator(*args, **kwargs)
+        else:
+            if len(args) > 0 or len(kwargs) > 0:
+                raise ValueError(
+                    "Cannot specify accelerator and accelerator args/kwargs"
+                )
+            self.accelerator = accelerator
+        super().__init__(num_inputs=num_inputs)
+
+    def before_fit(self, learner: Learner) -> None:
+        (
+            learner.model,
+            learner.criterion,
+            learner.opt,
+            learner.dataloaders.train,
+            learner.dataloaders.val,
+            learner.dataloaders.test,
+        ) = self.accelerator.prepare(
+            learner.model,
+            learner.criterion,
+            learner.opt,
+            learner.dataloaders.train,
+            learner.dataloaders.val,
+            learner.dataloaders.test,
+        )
+
+    def before_batch(self, learner: Learner) -> None:
+        self.accumulator = self.accelerator.accumulate(learner.model)
+        self.accumulator.__enter__()
+
+    def after_batch(self, learner: Learner) -> None:
+        self.accumulator.__exit__(None, None, None)
+
+    def backward(self, learner: Learner) -> None:
+        self.accelerator.backward(learner.loss)
 
 
 class AmpCallback(TrainCallback):
@@ -216,6 +224,7 @@ class MetricsCallback(Callback):
     def before_epoch(self, learner: Learner) -> None:
         for metric in self.metrics.values():
             metric.reset()
+        self.loss.reset()
 
     def after_epoch(self, learner: Learner) -> None:
         prefix = "train" if learner.training else "val"
@@ -223,39 +232,48 @@ class MetricsCallback(Callback):
             f"{prefix}/{name}": metric.compute()
             for name, metric in self.metrics.items()
         }
+        log[f"{prefix}/loss"] = self.loss.compute()
         log[f"{prefix}/epoch"] = learner.epoch
-        learner.log(log)
+        if learner.training:
+            self.train_log = log
+        else:
+            log.update(self.train_log)
+            learner.log(log)
 
     def after_batch(self, learner: Learner) -> None:
         targets = to_device(learner.batch_targets, "cpu")
         for metric in self.metrics.values():
             metric.update(to_device(learner.preds, "cpu"), targets)
-        self.loss.update(to_device(learner.loss, "cpu"), weight=len(learner.batch_inputs[0]))
+        self.loss.update(
+            to_device(learner.loss, "cpu"), weight=len(learner.batch_inputs[0])
+        )
 
 
 class ProgressBarCallback(Callback):
     order: int = 1
 
-    def __init__(self, plot: bool = False) -> None:
+    def __init__(self, plot: bool = False, plot_update_freq: int = 1) -> None:
         super().__init__()
         self.plot = plot
         self.first_epoch: bool = True
+        self.plot_update_freq = plot_update_freq
         self.mbar: MasterBar
 
     def _update_graph(self, learner: Learner) -> None:
-        self.mbar.update_graph(
-            [
-                [range(len(self.losses)), self.losses],
+        if learner.iteration % self.plot_update_freq == 0:
+            self.mbar.update_graph(
                 [
-                    torch.arange(1, learner.total_epochs + 1)
-                    * len(learner.dataloaders.train),  # type: ignore
-                    self.val_losses,
-                ],
-            ]
-        )
+                    [range(len(self.losses)), self.losses],
+                    [
+                        torch.arange(1, len(self.val_losses) + 1)
+                        * len(learner.dataloaders.train),  # type: ignore
+                        self.val_losses,
+                    ],
+                ]
+            )
 
     def _log(
-        self, learner: Learner, log: dict[str, float], wrapped: Callable | None = None
+        self, log: dict[str, float], learner: Learner, wrapped: Callable | None = None
     ) -> None:
         if self.first_epoch:
             self.mbar.write(list(log), table=True)  # type: ignore
@@ -265,10 +283,12 @@ class ProgressBarCallback(Callback):
             wrapped(log)
 
     def before_fit(self, learner: Learner) -> None:
-        learner.epochs = self.mbar = master_bar(learner.total_epochs)
+        learner.epochs = self.mbar = master_bar(learner.epochs)
         self.first_epoch = True
         if hasattr(learner, "metrics"):
-            log_fn = partial(self._log, wrapped=getattr(learner, "log", None))
+            log_fn = partial(
+                self._log, learner=learner, wrapped=getattr(learner, "log", None)
+            )
             learner.log = log_fn
         self.losses: list[float] = []
         self.val_losses: list[float] = []

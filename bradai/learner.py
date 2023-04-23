@@ -101,7 +101,7 @@ class Learner:
         for self.epoch in self.epochs:
             self.one_epoch(True)
             self.callback("after_train")
-            if self.epoch % val_freq == 0:
+            if val_freq > 0 and self.epoch % val_freq == 0:
                 with torch.inference_mode():
                     self.one_epoch(False)
                 self.callback("after_val")
@@ -121,18 +121,20 @@ class Learner:
             self.epochs = range(self.total_epochs)
             self._fit(val_freq)
         finally:
-            self.callbacks = self.callbacks[: -len(callbacks)]  # remove temp callbacks
+            self.callbacks = self.callbacks[
+                : len(self.callbacks) - len(callbacks)
+            ]  # remove temp callbacks
 
     def __getattr__(self, name: str) -> Callable:
         if name in ("predict", "get_loss", "backward", "step", "zero_grad", "log"):
             return partial(self.callback, name)
         raise AttributeError(name)
 
-    def callback(self, name: str) -> None:
+    def callback(self, name: str, *args: Any, **kwargs: Any) -> None:
         for callback in sorted(self.callbacks, key=attrgetter("order")):
             method = getattr(callback, name, None)
             if method is not None:
-                method(self)
+                method(self, *args, **kwargs)
 
     def lr_find(
         self,
@@ -140,10 +142,11 @@ class Learner:
         hysteresis: float = 3.0,
         start_lr: float = 1e-6,
         max_epochs: int = 10,
+        max_lr: float = float("inf"),
     ) -> None:
         self.fit(
             max_epochs,
             val_freq=0,
-            callbacks=[LRFinderCallback(gamma, hysteresis)],
+            callbacks=[LRFinderCallback(gamma, hysteresis, max_lr=max_lr)],
             learning_rate=start_lr,
         )
